@@ -1,10 +1,20 @@
 # 💠 Raggy
 
-[![Tests](https://github.com/OT75/Raggy/actions/workflows/tests.yml/badge.svg)](https://github.com/OT75/Raggy/actions/workflows/tests.yml)
+[![Tests](https://github.com/OT75/Raggy2/actions/workflows/tests.yml/badge.svg)](https://github.com/OT75/Raggy2/actions/workflows/tests.yml)
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 
-A document-grounded assistant that answers questions from uploaded PDFs ,
+A document-grounded assistant that answers questions from uploaded PDFs,
 with source citations, and honest disclosure when an answer isn't backed by
 your documents.
+
+![Raggy chat interface](docs/ui-overview.png)
+
+**At a glance**
+
+- **Three explicit answer modes** (general / fallback / grounded), so an answer from general knowledge is never presented as coming from your documents
+- **Routing by retrieval score**, not by asking the model: inspectable, tunable and testable
+- **Labeled eval across two independent documents:** 35 cases, 32 passing, 3 documented edge cases
+- **FastAPI + React/TypeScript**, a framework-agnostic RAG core, Docker Compose, CI
 
 ## Overview
 
@@ -20,23 +30,22 @@ explicit modes:
 | **Grounded (RAG)** | Documents exist and cover the question        | Answer built from retrieved chunks, with sources shown  |
 
 Routing is decided by a similarity score against the document index, not by
-asking the model to self-report relevance , an inspectable, tunable signal
+asking the model to self-report relevance: an inspectable, tunable signal
 rather than a black box.
 
 ## Features
 
 - **Three-mode response routing** with visible labeling of grounded vs.
   ungrounded answers
-- **Multi-document knowledge base** , upload, view, and remove individual
+- **Multi-document knowledge base:** upload, view, and remove individual
   documents; the index updates incrementally rather than rebuilding from
   scratch on every change
-- **Conversation memory** , follow-up questions are understood in context,
-  not treated as isolated queries. Recent turns are kept in full; older
-  turns that age out of the window are compressed into a running summary
-  rather than discarded outright
-- **Source citations** , every grounded answer links back to the exact text
+- **Conversation memory:** follow-up questions are rewritten into standalone
+  questions using the recent conversation, so they're understood in context
+  rather than treated as isolated queries. The last 6 messages are kept
+- **Source citations:** every grounded answer links back to the exact text
   it was built from
-- **Multi-provider generation** , Groq (Llama 3.3 70B) or OpenAI (GPT-4o mini)
+- **Multi-provider generation:** Groq (Llama 3.3 70B) or OpenAI (GPT-4o mini)
   for answering, selectable per session, with an optional user-supplied API
   key. Embeddings always run locally (see Design notes) regardless of which
   provider is selected for generation.
@@ -45,7 +54,7 @@ rather than a black box.
 
 ```mermaid
 flowchart TB
-    subgraph Indexing["Indexing , runs once, per document upload"]
+    subgraph Indexing["Indexing: runs once per document upload"]
         direction TB
         Upload(["PDF upload"])
         Extract(["Extract text"])
@@ -55,7 +64,7 @@ flowchart TB
         Upload --> Extract --> Chunk --> EmbedDocs --> FAISS
     end
 
-    subgraph Answering["Answering , runs on every question"]
+    subgraph Answering["Answering: runs on every question"]
         direction TB
         Question(["User question + history"])
         Context(["Query contextualization"])
@@ -98,16 +107,16 @@ flowchart TB
 
 Document embedding happens once, at upload time, and never touches the
 question-answering path. The only embedding that happens per question is
-embedding the query text itself, inside the retrieval step , a distinct,
+embedding the query text itself, inside the retrieval step: a distinct,
 much smaller operation from indexing a whole document. Both apps below
 (Streamlit and FastAPI + React) run this exact logic; neither runtime shares
 state with the other.
 
 ```
-Raggy/
+Raggy2/
 ├── .github/workflows/
-│   └── tests.yml       CI , runs the labeled eval on every push
-├── backend/             FastAPI API , session-based, wraps rag_engine
+│   └── tests.yml       CI: runs the labeled eval on every push to main
+├── backend/             FastAPI API: session-based, wraps rag_engine
 │   ├── main.py
 │   ├── rag_engine.py    Core RAG logic, framework-agnostic
 │   ├── Dockerfile
@@ -145,7 +154,7 @@ architecture evolved.
 
 ## Running it
 
-**With Docker (recommended , runs both services together):**
+**With Docker (recommended, runs both services together):**
 
 ```bash
 docker compose up --build
@@ -180,18 +189,18 @@ streamlit run app.py
 Each part reads API keys from a `.env` file (`GROQ_API_KEY` and/or
 `OPENAI_API_KEY`). A key can also be supplied directly in the UI, which
 takes priority over the `.env` default. `.env` is never baked into a Docker
-image , it's excluded via `.dockerignore` and injected at container run time.
+image: it's excluded via `.dockerignore` and injected at container run time.
 
 ## Testing
 
 A labeled routing eval (`backend/tests/test_routing.py`) checks two things
 against real sample documents: does the router pick the correct mode
-(general / fallback / grounded), and , for grounded answers , did retrieval
+(general / fallback / grounded), and, for grounded answers, did retrieval
 actually surface the chunk containing the answer, not just any chunk.
 
 Generalized across two independently-written documents (an HR internship
 handbook and an unrelated SaaS pricing/support policy) via one plain dict
-mapping filename to labeled questions , testing a new document is a data
+mapping filename to labeled questions: testing a new document is a data
 change, not a code change.
 
 ```bash
@@ -199,22 +208,24 @@ cd backend
 pytest tests/test_routing.py -v -s
 ```
 
-Current result: **35 tests, 32 passing, 3 known `xfail`s** , none hidden,
+Current result: **35 tests, 32 passing, 3 known `xfail`s**, none hidden,
 each with a documented reason in the test file. All three come from the
 same root cause: a single global similarity threshold cannot perfectly
 separate every case. One genuinely out-of-scope question can score _lower_
-than several genuinely answerable ones, on both documents independently ,
+than several genuinely answerable ones, on both documents independently:
 evidence this is a real property of the approach (small local embeddings,
 one global threshold), not a quirk of one document's phrasing. The
-threshold (`score_threshold=1.5` in `rag_engine.py`) was empirically tuned
+threshold (`score_threshold=1.5` in `rag_engine.py`; FAISS returns a distance,
+so lower means closer, and a question whose best chunk is further than 1.5
+falls back) was empirically tuned
 against the first document's eval and chosen to favor the safer failure
 mode: an answerable question occasionally falling back, rather than an
 irrelevant question being presented as grounded. Before tuning, the same
 eval scored 12/20 (60%) at a guessed threshold of 1.0 on the first
 document alone.
 
-CI (`.github/workflows/tests.yml`) runs this eval on every push. It needs a
-`GROQ_API_KEY` repository secret to actually execute , without one, it skips
+CI (`.github/workflows/tests.yml`) runs this eval on every push to `main`. It needs a
+`GROQ_API_KEY` repository secret to actually execute; without one, it skips
 cleanly rather than failing on a missing secret.
 
 ## Screenshots
@@ -233,7 +244,7 @@ cleanly rather than failing on a missing secret.
 
 - **Score-based routing over LLM self-assessment.** Deciding "is this
   grounded?" via a similarity-score threshold, rather than asking the model
-  to judge its own relevance, keeps the decision inspectable and tunable ,
+  to judge its own relevance, keeps the decision inspectable and tunable,
   and testable, per the Testing section above.
 - **Threshold tuned empirically, not guessed.** The eval suite found real
   overlap between answerable and out-of-scope questions at the score level;
@@ -244,7 +255,7 @@ cleanly rather than failing on a missing secret.
   selected.** Early on, embeddings followed whichever provider (Groq or
   OpenAI) was active at the moment a document was added. That meant two
   documents added under different provider selections could end up embedded
-  in incompatible vector spaces inside the same FAISS index , a latent
+  in incompatible vector spaces inside the same FAISS index: a latent
   correctness bug, not just a cost/privacy tradeoff. Pinning embeddings to a
   single local model (HuggingFace `all-MiniLM-L6-v2`) fixes that, keeps
   document content off any third-party API, and costs nothing. The LLM
@@ -258,13 +269,14 @@ cleanly rather than failing on a missing secret.
 - **Sliding-window chat history**, capped at the last 6 messages (3
   exchanges); older turns are dropped, not summarized. A summary-buffer
   layer (compressing overflow turns instead of discarding them) was
-  designed and briefly working, and could be added baed on the available resources.
+  designed and briefly working, and could be added based on the available resources.
 
 ## Stack
 
-Python, FastAPI, LangChain, FAISS, HuggingFace embeddings, pypdf, Groq,
+Python, FastAPI, LangChain components (text splitter, model clients, FAISS
+wrapper; no prebuilt chains), FAISS, HuggingFace embeddings, pypdf, Groq,
 OpenAI, React, TypeScript, Vite, Streamlit, Docker, pytest, GitHub Actions.
 
 ## License
 
-MIT , see [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE).
